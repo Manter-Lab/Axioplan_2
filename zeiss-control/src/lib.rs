@@ -32,28 +32,23 @@ pub struct ScopeResponse {
     response_size: usize
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ScopeTurret {
-    Reflector,
-    Objective,
-    DensityFilter1,
-    DensityFilter2,
-    Condenser,
-    Optovar,
-    TubeLens,
-    BasePort,
-    SidePort,
-    LampMirror,
+    Reflector = 1,
+    Objective = 2,
+    DensityFilter1 = 3,
+    DensityFilter2 = 4,
+    Condenser = 5,
 }
 
 impl ScopeTurret {
-    fn number(self) -> u8 {
+    pub fn positions(self) -> u8 {
         match self {
-            Self::Reflector => 1,
-            Self::Objective => 2,
-            Self::DensityFilter1 => 3,
+            Self::Reflector => 0,
+            Self::Objective => 6,
+            Self::DensityFilter1 => 4,
             Self::DensityFilter2 => 4,
-            Self::Condenser => 5,
-            _ => unimplemented!()
+            Self::Condenser => 0,
         }
     }
 }
@@ -140,7 +135,7 @@ impl Scope {
         &mut self,
         turret: ScopeTurret,
     ) -> Result<u8, Box<dyn Error>> {
-        let query = format!("HPCr{},1\r", turret.number());
+        let query = format!("HPCr{},1\r", turret as u8);
 
         let res = self.query_scope(&query)?;
         let response = self.validate(&query, &res.response)?;
@@ -155,7 +150,11 @@ impl Scope {
         turret: ScopeTurret,
         position: u8
     ) -> Result<(), Box<dyn Error>> {
-        let query = format!("HPCR{},{}\r", turret.number(), position);
+        if position > turret.positions() {
+            return Err("Position out of range".into());
+        }
+
+        let query = format!("HPCR{},{}\r", turret as u8, position);
 
         self.query_scope(&query)?;
 
@@ -192,7 +191,7 @@ impl Scope {
         result_24.push(0);
         result_24.reverse();
 
-        let final_number = zeiss_to_i64(i64::from_be_bytes(result_24[0..4].try_into().unwrap()));
+        let final_number = zeiss_to_i64(i32::from_be_bytes(result_24[0..4].try_into().unwrap()) as i64);
         Ok(final_number)
     }
 
@@ -211,9 +210,35 @@ impl Scope {
         Ok(())
     }
 
+    pub fn focus_limit_upper(&mut self) -> Result<i64, Box<dyn Error>> {
+        let query = "FPZu\r";
+        let res = self.query_scope(&query)?;
+        let response = self.validate(query, &res.response)?;
+        let mut result_24 = hex::decode(&response).unwrap().to_vec();
+        result_24.reverse();
+        result_24.push(0);
+        result_24.reverse();
+        let value = zeiss_to_i64(i32::from_be_bytes(result_24.try_into().unwrap()) as i64);
+
+        Ok(value)
+    }
+
+    pub fn focus_limit_lower(&mut self) -> Result<i64, Box<dyn Error>> {
+        let query = "FPZl\r";
+        let res = self.query_scope(&query)?;
+        let response = self.validate(query, &res.response)?;
+        let mut result_24 = hex::decode(&response).unwrap().to_vec();
+        result_24.reverse();
+        result_24.push(0);
+        result_24.reverse();
+        let value = zeiss_to_i64(i32::from_be_bytes(result_24[0..4].try_into().unwrap()) as i64);
+
+        Ok(value)
+    }
+
     /// Gets the focus distance (Z) in micrometers (μm)
     pub fn focus_dist_um(&mut self) -> Result<f64, Box<dyn Error>> {
-        Ok(Self::STEP_SIZE / self.focus_dist()? as f64)
+        Ok(Self::STEP_SIZE * self.focus_dist()? as f64)
     }
 
     /// Sets the focus distance (Z) in micrometers (μm)
