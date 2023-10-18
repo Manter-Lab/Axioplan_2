@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 hex = "0.4.3"
 serialport = "4.2.2"
+nokhwa = { version = "0.10.4", features = ["input-native", "output-wgpu"]}

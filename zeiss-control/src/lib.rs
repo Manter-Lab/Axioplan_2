@@ -61,19 +61,19 @@ impl ScopeTurret {
 impl Scope {
     const STEP_SIZE: f64 = 0.050;
 
-    pub fn new(scope_port: &str, stage_port: &str) -> Self {
+    pub fn new(scope_port: &str, stage_port: &str) -> Result<Self, Box<dyn Error>> {
         let scope_port = serialport::new(scope_port, 9600)
             .timeout(Duration::from_millis(10))
-            .open().expect("Failed to open port");
+            .open()?;
 
         let stage_port = serialport::new(stage_port, 9600)
             .timeout(Duration::from_millis(10))
-            .open().expect("Failed to open port");
+            .open()?;
 
-        Scope {
+        Ok(Scope {
             scope_port,
             stage_port,
-        }
+        })
     }
 
     pub fn query_scope(&mut self, query: &str) -> Result<ScopeResponse, Box<dyn Error>> {
