@@ -1,19 +1,27 @@
+use std::collections::HashMap;
+
 use iced::executor;
-use iced::widget::{Slider, text, button, Rule, row, column, container};
+use iced::widget::{Slider, pick_list, text, button, Rule, row, column, container};
 use iced::window;
 use iced::subscription::Subscription;
 use iced::{Alignment, Application, Command, Element, Length, Settings, Theme};
 use zeiss_control::{Scope, ScopeTurret};
 
 fn main() {
+    /*
+    let mut scope = Scope::new(
+        "/dev/ttyUSB1",
+        "/dev/ttyUSB0"
+    ).unwrap();
+    */
+
     ScopeApp::run(Settings::default()).unwrap();
 }
 
 struct ScopeApp {
     scope: Option<Scope>,
-    objective_position: u8,
     ld_value: u8,
-
+    turret_positions: HashMap<ScopeTurret, u8>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +29,7 @@ enum Message {
     Exit,
     ChangeTurret(ScopeTurret, u8),
     LDUpdate(u8),
+    UpdateValues,
 }
 
 impl Application for ScopeApp {
@@ -30,7 +39,7 @@ impl Application for ScopeApp {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        let scope = match Scope::new(
+        let mut scope = match Scope::new(
             "/dev/ttyUSB1",
             "/dev/ttyUSB0"
         ) {
@@ -43,10 +52,19 @@ impl Application for ScopeApp {
             }
         };
 
+        let turret_positions = HashMap::from(
+            [(ScopeTurret::Objective,
+              scope.as_mut().unwrap().turret_pos(ScopeTurret::Objective).unwrap()),
+             (ScopeTurret::DensityFilter1,
+              scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter1).unwrap()),
+             (ScopeTurret::DensityFilter2,
+              scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter2).unwrap())]
+        );
+
         (Self {
             scope,
-            objective_position: 1,
             ld_value: 250,
+            turret_positions: turret_positions.clone(),
         }, Command::none())
     }
 
@@ -58,8 +76,10 @@ impl Application for ScopeApp {
         Theme::Dark
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
-        Subscription::none()
+    fn subscription(&self) -> Subscription<Message> {
+        iced::time::every(std::time::Duration::from_millis(100)).map(|_| {
+            Message::UpdateValues
+        })
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -67,7 +87,7 @@ impl Application for ScopeApp {
             Message::Exit => window::close(),
             Message::ChangeTurret(turret, position) => {
                 self.scope.as_mut().unwrap().set_turret_pos(turret, position).unwrap();
-                self.objective_position = position;
+                self.turret_positions.insert(ScopeTurret::Objective, position);
                 Command::none()
             },
             Message::LDUpdate(value) => {
@@ -75,6 +95,18 @@ impl Application for ScopeApp {
                 self.ld_value = value;
                 Command::none()
             },
+            Message::UpdateValues => {
+                self.ld_value = self.scope.as_mut().unwrap().ld_pos().unwrap();
+                self.turret_positions.insert(
+                    ScopeTurret::DensityFilter1,
+                    self.scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter1).unwrap()
+                );
+                self.turret_positions.insert(
+                    ScopeTurret::DensityFilter2,
+                    self.scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter2).unwrap()
+                );
+                Command::none()
+            }
         }
     }
 
@@ -96,16 +128,26 @@ impl Application for ScopeApp {
                     .on_press(Message::ChangeTurret(ScopeTurret::Objective, 6)),
             ]
             .spacing(5)
-            .padding(10)
+            .padding(5)
         ]
-        .padding(10)
+        .align_items(Alignment::Center);
+
+        let density_filters = column![
+            pick_list(
+                "pick",
+                self.turret_positions.get(&ScopeTurret::DensityFilter1),
+                Message::ChangeTurret(ScopeTurret::DensityFilter1, 1),
+            )
+        ]
         .align_items(Alignment::Center);
 
         let ld_size = column![
             text("Light Diaphragm Aperture").width(Length::Fill),
-            Slider::new(0..=250, self.ld_value, Message::LDUpdate)
+            row![
+                text(self.ld_value),
+                Slider::new(0..=250, self.ld_value, Message::LDUpdate)
+            ]
         ]
-        .padding(10)
         .align_items(Alignment::Center);
 
         let column2 = column![
@@ -120,8 +162,14 @@ impl Application for ScopeApp {
         let content = row![
             column![
                 objective_turret_selection,
+                Rule::horizontal(1),
+                density_filters,
+                Rule::horizontal(1),
                 ld_size,
-            ].width(Length::Fixed(250.0)),
+            ]
+            .padding(20)
+            .spacing(20)
+            .width(Length::Fixed(250.0)),
             Rule::vertical(1),
             column2,
         ]

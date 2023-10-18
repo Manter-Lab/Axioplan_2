@@ -19,7 +19,7 @@ use hex;
  *
  */
 
-const TIMEOUT: u128 = 200;
+const TIMEOUT: u128 = 50;
 
 pub struct Scope {
     pub scope_port: Box<dyn SerialPort>,
@@ -32,7 +32,7 @@ pub struct ScopeResponse {
     response_size: usize
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum ScopeTurret {
     Reflector = 1,
     Objective = 2,
@@ -71,7 +71,7 @@ impl Scope {
         })
     }
 
-    pub fn query_scope(&mut self, query: &str) -> Result<ScopeResponse, Box<dyn Error>> {
+    pub fn query_scope(&mut self, query: &str, expect_response: bool) -> Result<ScopeResponse, Box<dyn Error>> {
         let query_bytes = query.as_bytes();
         let mut read_buffer: Vec<u8> = vec![];
 
@@ -79,6 +79,14 @@ impl Scope {
 
         // Send the specified query to the scope
         self.scope_port.write(query_bytes)?;
+
+        // Exit early if no response expected
+        if expect_response == false {
+            return Ok(ScopeResponse {
+                response: vec![],
+                response_size: 0
+            })
+        }
 
         // Read bytes from the port until there are none left
         let mut elapsed = Instant::now();
@@ -110,7 +118,7 @@ impl Scope {
     }
 
     pub fn query_scope_print(&mut self, query: &str) -> Result<(), Box<dyn Error>> {
-        let result = self.query_scope(query)?;
+        let result = self.query_scope(query, true)?;
         println!("{:?}", result.response);
         println!("{}\r", String::from_utf8(result.response).unwrap());
         Ok(())
@@ -137,7 +145,7 @@ impl Scope {
     ) -> Result<u8, Box<dyn Error>> {
         let query = format!("HPCr{},1\r", turret as u8);
 
-        let res = self.query_scope(&query)?;
+        let res = self.query_scope(&query, true)?;
         let response = self.validate(&query, &res.response)?;
         let number = String::from_utf8(response).unwrap();
 
@@ -156,15 +164,15 @@ impl Scope {
 
         let query = format!("HPCR{},{}\r", turret as u8, position);
 
-        self.query_scope(&query)?;
+        self.query_scope(&query, false)?;
 
         Ok(())
     }
 
     /// Gets the light diaphragm aperture
-    pub fn ld_pos(&mut self) -> Result<u16, Box<dyn Error>> {
+    pub fn ld_pos(&mut self) -> Result<u8, Box<dyn Error>> {
         let query = "HPCs4,1\r";
-        let res = self.query_scope(query)?;
+        let res = self.query_scope(query, true)?;
         let response = self.validate(&query, &res.response)?;
         let res_string = String::from_utf8(response).unwrap();
 
@@ -175,7 +183,7 @@ impl Scope {
     pub fn set_ld_pos(&mut self, position: u8) -> Result<(), Box<dyn Error>> {
         let query = format!("HPCS4,{}\r", position);
 
-        self.query_scope(&query)?;
+        self.query_scope(&query, false)?;
 
         Ok(())
     }
@@ -184,7 +192,7 @@ impl Scope {
     pub fn focus_dist(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZp\r";
 
-        let res = self.query_scope(query)?;
+        let res = self.query_scope(query, true)?;
         let result = self.validate(query, &res.response)?;
         let mut result_24 = hex::decode(&result).unwrap().to_vec();
         result_24.reverse();
@@ -205,14 +213,14 @@ impl Scope {
 
         println!("{output_num}\n{query}");
 
-        self.query_scope(&query).unwrap();
+        self.query_scope(&query, false).unwrap();
 
         Ok(())
     }
 
     pub fn focus_limit_upper(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZu\r";
-        let res = self.query_scope(&query)?;
+        let res = self.query_scope(&query, true)?;
         let response = self.validate(query, &res.response)?;
         let mut result_24 = hex::decode(&response).unwrap().to_vec();
         result_24.reverse();
@@ -225,7 +233,7 @@ impl Scope {
 
     pub fn focus_limit_lower(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZl\r";
-        let res = self.query_scope(&query)?;
+        let res = self.query_scope(&query, true)?;
         let response = self.validate(query, &res.response)?;
         let mut result_24 = hex::decode(&response).unwrap().to_vec();
         result_24.reverse();
