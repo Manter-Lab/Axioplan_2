@@ -7,6 +7,9 @@ use iced::subscription::Subscription;
 use iced::{Alignment, Application, Command, Element, Length, Settings, Theme};
 use zeiss_control::{Scope, ScopeTurret};
 
+use pretty_env_logger;
+#[macro_use] extern crate log;
+
 fn main() {
     /*
     let mut scope = Scope::new(
@@ -15,7 +18,15 @@ fn main() {
     ).unwrap();
     */
 
-    ScopeApp::run(Settings::default()).unwrap();
+    pretty_env_logger::init();
+
+    ScopeApp::run(Settings {
+        window: window::Settings {
+            size: (640, 480),
+            ..Default::default()
+        },
+        ..Default::default()
+    }).unwrap();
 }
 
 struct ScopeApp {
@@ -26,7 +37,6 @@ struct ScopeApp {
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
-    Exit,
     ChangeTurret(ScopeTurret, u8),
     LDUpdate(u8),
     UpdateValues,
@@ -47,7 +57,7 @@ impl Application for ScopeApp {
                 Some(newscope)
             },
             Err(errormessage) => {
-                println!("ERROR: {}", errormessage);
+                error!("{}", errormessage);
                 None
             }
         };
@@ -63,7 +73,7 @@ impl Application for ScopeApp {
                     (ScopeTurret::DensityFilter2,
                     scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter2).unwrap_or_default())]
                 ),
-            None => ()
+            None => error!("Scope variables not initalized")
         }
 
         (Self {
@@ -89,31 +99,40 @@ impl Application for ScopeApp {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::Exit => window::close(),
-            Message::ChangeTurret(turret, position) => {
-                self.scope.as_mut().unwrap().set_turret_pos(turret, position).unwrap();
-                self.turret_positions.insert(ScopeTurret::Objective, position);
+            Message::ChangeTurret(turret, position) => { // Change the state of a turret on the scope
+                match self.scope {
+                    Some(_) => {
+                        self.scope.as_mut().unwrap().set_turret_pos(turret, position).unwrap();
+                    },
+                    None => warn!("Failed to update {turret:?} to position {position}, scope is `None`")
+                }
+                self.turret_positions.insert(turret, position);
                 Command::none()
             },
-            Message::LDUpdate(value) => {
-                self.scope.as_mut().unwrap().set_ld_pos(value).unwrap();
+            Message::LDUpdate(value) => { // Change the state of the Light Diaphragm on the scope
+                match self.scope {
+                    Some(_) => {
+                        self.scope.as_mut().unwrap().set_ld_pos(value).unwrap();
+                    },
+                    None => warn!("Failed to update Light Diaphragm to {value}, scope is `None`")
+                }
                 self.ld_value = value;
                 Command::none()
             },
             Message::UpdateValues => {
                 match self.scope {
                     Some(_) => {
-                        self.ld_value = self.scope.as_mut().unwrap().ld_pos().unwrap();
-                        self.turret_positions.insert(
+                        self.ld_value = self.scope.as_mut().unwrap().ld_pos().unwrap(); // Light Diaphragm
+                        self.turret_positions.insert( // Density filter 1
                             ScopeTurret::DensityFilter1,
                             self.scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter1).unwrap()
                         );
-                        self.turret_positions.insert(
+                        self.turret_positions.insert( // Density filter 2
                             ScopeTurret::DensityFilter2,
                             self.scope.as_mut().unwrap().turret_pos(ScopeTurret::DensityFilter2).unwrap()
                         );
                     },
-                    None => ()
+                    None => info!("Failed to update values, scope is `None`")
                 }
                 Command::none()
             }
