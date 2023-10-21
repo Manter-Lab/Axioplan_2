@@ -21,9 +21,19 @@ use hex;
 
 const TIMEOUT: u128 = 50;
 
+#[derive(Debug)]
 pub struct Scope {
     pub scope_port: Box<dyn SerialPort>,
     pub stage_port: Box<dyn SerialPort>,
+}
+
+impl Clone for Scope {
+    fn clone(&self) -> Self {
+        Scope {
+            scope_port: self.scope_port.try_clone().unwrap(),
+            stage_port: self.scope_port.try_clone().unwrap()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -34,6 +44,7 @@ pub struct ScopeResponse {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum ScopeTurret {
+    Unknown = 0,
     Reflector = 1,
     Objective = 2,
     DensityFilter1 = 3,
@@ -44,6 +55,7 @@ pub enum ScopeTurret {
 impl ScopeTurret {
     pub fn positions(self) -> u8 {
         match self {
+            Self::Unknown => 0,
             Self::Reflector => 0,
             Self::Objective => 6,
             Self::DensityFilter1 => 4,
