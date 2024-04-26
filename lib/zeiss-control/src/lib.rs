@@ -3,23 +3,7 @@ use std::time::Duration;
 use std::error::Error;
 use std::thread::sleep;
 use std::time::Instant;
-use hex;
 
-/*
- * Useful things to know:
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-const TIMEOUT: u128 = 50;
 
 #[derive(Debug)]
 pub struct Scope {
@@ -66,15 +50,19 @@ impl ScopeTurret {
 }
 
 impl Scope {
+    /// Communication timout
+    const TIMEOUT: Duration = Duration::from_millis(50);
+
+    /// Size of focus steps in micrometers
     const STEP_SIZE: f64 = 0.050;
 
     pub fn new(scope_port: &str, stage_port: &str) -> Result<Self, Box<dyn Error>> {
         let scope_port = serialport::new(scope_port, 9600)
-            .timeout(Duration::from_millis(10))
+            .timeout(Self::TIMEOUT)
             .open()?;
 
         let stage_port = serialport::new(stage_port, 9600)
-            .timeout(Duration::from_millis(10))
+            .timeout(Self::TIMEOUT)
             .open()?;
 
         Ok(Scope {
@@ -83,6 +71,7 @@ impl Scope {
         })
     }
 
+    /// Query the scope, sending a packet and getting some response
     pub fn query_scope(&mut self, query: &str, expect_response: bool) -> Result<ScopeResponse, Box<dyn Error>> {
         let query_bytes = query.as_bytes();
         let mut read_buffer: Vec<u8> = vec![];
@@ -90,10 +79,10 @@ impl Scope {
         self.scope_port.clear(serialport::ClearBuffer::All).unwrap();
 
         // Send the specified query to the scope
-        self.scope_port.write(query_bytes)?;
+        self.scope_port.write_all(query_bytes)?;
 
         // Exit early if no response expected
-        if expect_response == false {
+        if !expect_response {
             return Ok(ScopeResponse {
                 response: vec![],
                 response_size: 0
@@ -106,11 +95,12 @@ impl Scope {
             let avail =  self.scope_port.bytes_to_read().unwrap();
             if avail == 0 {
                 sleep(Duration::from_millis(5));
-                if elapsed.elapsed().as_millis() >= TIMEOUT {
+                if elapsed.elapsed() >= Self::TIMEOUT {
                     break;
                 }
                 continue;
             }
+
             // Reset the timeout if able to read
             elapsed = Instant::now();
             let mut chunk: Vec<u8> = vec![0u8; avail as usize];
@@ -136,10 +126,11 @@ impl Scope {
         Ok(())
     }
 
+    /// Validate the query and get data from it
     fn validate(
         &self,
         query: &str,
-        result: &Vec<u8>
+        result: &[u8]
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut query_check = query.as_bytes()[0..2].to_vec();
         query_check.reverse();
@@ -185,7 +176,7 @@ impl Scope {
     pub fn ld_pos(&mut self) -> Result<u8, Box<dyn Error>> {
         let query = "HPCs4,1\r";
         let res = self.query_scope(query, true)?;
-        let response = self.validate(&query, &res.response)?;
+        let response = self.validate(query, &res.response)?;
         let res_string = String::from_utf8(response).unwrap();
 
         Ok(res_string.parse().unwrap())
@@ -206,7 +197,7 @@ impl Scope {
 
         let res = self.query_scope(query, true)?;
         let result = self.validate(query, &res.response)?;
-        let mut result_24 = hex::decode(&result).unwrap().to_vec();
+        let mut result_24 = hex::decode(result).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
         result_24.reverse();
@@ -221,7 +212,7 @@ impl Scope {
 
         let mut query = "FPZT".to_string();
         query.push_str(&output_num);
-        query.push_str("\r");
+        query.push('\r');
 
         println!("{output_num}\n{query}");
 
@@ -232,9 +223,9 @@ impl Scope {
 
     pub fn focus_limit_upper(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZu\r";
-        let res = self.query_scope(&query, true)?;
+        let res = self.query_scope(query, true)?;
         let response = self.validate(query, &res.response)?;
-        let mut result_24 = hex::decode(&response).unwrap().to_vec();
+        let mut result_24 = hex::decode(response).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
         result_24.reverse();
@@ -245,9 +236,9 @@ impl Scope {
 
     pub fn focus_limit_lower(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZl\r";
-        let res = self.query_scope(&query, true)?;
+        let res = self.query_scope(query, true)?;
         let response = self.validate(query, &res.response)?;
-        let mut result_24 = hex::decode(&response).unwrap().to_vec();
+        let mut result_24 = hex::decode(response).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
         result_24.reverse();
