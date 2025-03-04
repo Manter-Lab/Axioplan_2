@@ -4,6 +4,6 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-enum-iterator = "2.0"
-hex = "0.4.3"
-serialport = "4.3"
+enum-iterator = "2.1"
+hex = "0.4"
+serialport = "4.7"
