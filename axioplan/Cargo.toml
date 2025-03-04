@@ -6,4 +6,6 @@ edition = "2021"
 [dependencies]
 enum-iterator = "2.1"
 hex = "0.4"
+log = "0.4.26"
 serialport = "4.7"
+thiserror = "2.0.12"

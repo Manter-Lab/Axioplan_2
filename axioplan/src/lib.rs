@@ -1,60 +1,32 @@
+mod turret;
+mod error;
+
+use error::ScopeError;
+use log::debug;
 use serialport::{self, SerialPort};
+use turret::ScopeTurret;
 use std::time::Duration;
 use std::error::Error;
 use std::thread::sleep;
 use std::time::Instant;
-
 
 #[derive(Debug)]
 pub struct Scope {
     pub scope_port: Box<dyn SerialPort>,
 }
 
-impl Clone for Scope {
-    fn clone(&self) -> Self {
-        Scope {
-            scope_port: self.scope_port.try_clone().unwrap(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ScopeResponse {
-    response: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub enum ScopeTurret {
-    Unknown = 0,
-    Reflector = 1,
-    Objective = 2,
-    DensityFilter1 = 3,
-    DensityFilter2 = 4,
-    Condenser = 5,
-}
-
-impl ScopeTurret {
-    pub fn positions(self) -> u8 {
-        match self {
-            Self::Unknown => 0,
-            Self::Reflector => 0,
-            Self::Objective => 6,
-            Self::DensityFilter1 => 4,
-            Self::DensityFilter2 => 4,
-            Self::Condenser => 0,
-        }
-    }
-}
-
 impl Scope {
     /// Communication timout
-    const TIMEOUT: Duration = Duration::from_millis(50);
+    const TIMEOUT: Duration = Duration::from_millis(2000);
 
     /// Size of focus steps in micrometers
     const STEP_SIZE: f64 = 0.050;
 
-    pub fn new(scope_port: &str) -> Result<Self, Box<dyn Error>> {
-        let scope_port = serialport::new(scope_port, 9600)
+    /// Baud rate of the serial connection
+    const BAUD_RATE: u32 = 9600;
+
+    pub fn new(scope_port: &str) -> Result<Self, ScopeError> {
+        let scope_port = serialport::new(scope_port, Self::BAUD_RATE)
             .timeout(Self::TIMEOUT)
             .open()?;
 
@@ -64,20 +36,24 @@ impl Scope {
     }
 
     /// Query the scope, sending a packet and getting some response
-    pub fn query_scope(&mut self, query: &str, expect_response: bool) -> Result<ScopeResponse, Box<dyn Error>> {
-        let query_bytes = query.as_bytes();
+    pub fn query_scope(
+        &mut self,
+        query: &str,
+        expect_response: bool
+    ) -> Result<Option<Vec<u8>>, ScopeError> {
+        let mut query_bytes = query.as_bytes().to_vec();
+        query_bytes.push(b'\r');
         let mut read_buffer: Vec<u8> = vec![];
 
         self.scope_port.clear(serialport::ClearBuffer::All).unwrap();
 
         // Send the specified query to the scope
-        self.scope_port.write_all(query_bytes)?;
+        self.scope_port.write_all(&query_bytes)?;
+        self.scope_port.flush()?;
 
         // Exit early if no response expected
         if !expect_response {
-            return Ok(ScopeResponse {
-                response: vec![],
-            })
+            return Ok(None)
         }
 
         // Read bytes from the port until there are none left
@@ -102,9 +78,7 @@ impl Scope {
             }
         }
 
-        Ok(ScopeResponse {
-            response: read_buffer,
-        })
+        Ok(Some(read_buffer))
     }
 
     /// Validate the query and get data from it
@@ -112,28 +86,63 @@ impl Scope {
         &self,
         query: &str,
         result: &[u8]
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
+    ) -> Result<Vec<u8>, ScopeError> {
+        if result.len() < 2 {
+            return Err(ScopeError::EmptyResponse)
+        }
+
         let mut query_check = query.as_bytes()[0..2].to_vec();
         query_check.reverse();
 
         match query_check == result[0..2].to_vec() {
-            true => Ok(result[2.. result.len() - 1].to_vec()),
-            false => Err(format!("Query validation failed; {:?} != {:?}", query_check, result[0..2].to_vec()).into())
+            true => Ok(result[2..result.len() - 1].to_vec()),
+            false => Err(
+                ScopeError::QueryValidation(
+                    String::from_utf8(query_check.to_vec()).unwrap_or_default(),
+                    String::from_utf8(result[0..2].to_vec()).unwrap_or_default()
+                )
+            )
         }
+    }
+
+    fn query_validate(&mut self, query: &str, expect_response: bool) -> Result<Option<Vec<u8>>, ScopeError> {
+        let res = self.query_scope(&query, expect_response)?;
+
+        match expect_response {
+            true => self.validate(&query, &res.unwrap()).map(|v| Some(v)),
+            false => Ok(None)
+        }
+    }
+
+    pub fn firmware_version(&mut self) -> Result<(String, String), ScopeError> {
+        let query = format!("HPTv0");
+        let result = self.query_validate(&query, true)?.unwrap();
+
+        //println!("{}", String::from_utf8_lossy(&result));
+        let result = String::from_utf8_lossy(&result);
+
+        let version_strings = result
+            .split("_")
+            .collect::<Vec<&str>>();
+
+        if version_strings.len() != 2 {
+            return Err(ScopeError::InvalidResponse)
+        }
+
+        debug!("{}, {}", version_strings[0], version_strings[1]);
+
+        Ok((version_strings[0].to_string(), version_strings[1].to_string()))
     }
 
     /// Gets the position of a "Turret"
     pub fn turret_pos(
         &mut self,
         turret: ScopeTurret,
-    ) -> Result<u8, Box<dyn Error>> {
-        let query = format!("HPCr{},1\r", turret as u8);
+    ) -> Result<u8, ScopeError> {
+        let query = format!("HPCr{},1", turret as u8);
 
-        let res = self.query_scope(&query, true)?;
-        let response = self.validate(&query, &res.response)?;
-        let number = String::from_utf8(response).unwrap();
-
-        Ok(number.parse().unwrap())
+        let response = self.query_validate(&query, true)?.unwrap();
+        Ok(u8::from_str_radix(&String::from_utf8(response)?, 10)?)
     }
 
     /// Sets the position of a "Turret"
@@ -141,23 +150,24 @@ impl Scope {
         &mut self,
         turret: ScopeTurret,
         position: u8
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), ScopeError> {
         if position > turret.positions() {
-            return Err("Position out of range".into());
+            return Err(ScopeError::OutOfRange(
+                position as u64,
+                turret.positions() as u64
+            ));
         }
 
-        let query = format!("HPCR{},{}\r", turret as u8, position);
-
-        self.query_scope(&query, false)?;
+        let query = format!("HPCR{},{}", turret as u8, position);
+        self.query_validate(&query, false)?;
 
         Ok(())
     }
 
     /// Gets the light diaphragm aperture
-    pub fn light_diaphragm_aperture(&mut self) -> Result<u8, Box<dyn Error>> {
-        let query = "HPCs4,1\r";
-        let res = self.query_scope(query, true)?;
-        let response = self.validate(query, &res.response)?;
+    pub fn light_diaphragm_aperture(&mut self) -> Result<u8, ScopeError> {
+        let query = "HPCs4,1";
+        let response = self.query_validate(query, true)?.unwrap();
         let res_string = String::from_utf8(response).unwrap();
 
         Ok(res_string.parse().unwrap())
@@ -165,19 +175,18 @@ impl Scope {
 
     /// Sets the light diaphragm aperture
     pub fn set_light_diaphragm_aperture(&mut self, position: u8) -> Result<(), Box<dyn Error>> {
-        let query = format!("HPCS4,{}\r", position);
+        let query = format!("HPCS4,{}", position);
 
-        self.query_scope(&query, false)?;
+        self.query_validate(&query, false)?;
 
         Ok(())
     }
 
     /// Gets the focus distance (Z) in steps
     pub fn focus_distance(&mut self) -> Result<i64, Box<dyn Error>> {
-        let query = "FPZp\r";
+        let query = "FPZp";
 
-        let res = self.query_scope(query, true)?;
-        let result = self.validate(query, &res.response)?;
+        let result = self.query_validate(query, true)?.unwrap();
         let mut result_24 = hex::decode(result).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
@@ -193,19 +202,17 @@ impl Scope {
 
         let mut query = "FPZT".to_string();
         query.push_str(&output_num);
-        query.push('\r');
 
         println!("{output_num}\n{query}");
 
-        self.query_scope(&query, false).unwrap();
+        self.query_validate(&query, false).unwrap();
 
         Ok(())
     }
 
     pub fn focus_limit_upper(&mut self) -> Result<i64, Box<dyn Error>> {
-        let query = "FPZu\r";
-        let res = self.query_scope(query, true)?;
-        let response = self.validate(query, &res.response)?;
+        let query = "FPZu";
+        let response = self.query_validate(query, true)?.unwrap();
         let mut result_24 = hex::decode(response).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
@@ -216,9 +223,8 @@ impl Scope {
     }
 
     pub fn focus_limit_lower(&mut self) -> Result<i64, Box<dyn Error>> {
-        let query = "FPZl\r";
-        let res = self.query_scope(query, true)?;
-        let response = self.validate(query, &res.response)?;
+        let query = "FPZl";
+        let response = self.query_validate(query, true)?.unwrap();
         let mut result_24 = hex::decode(response).unwrap().to_vec();
         result_24.reverse();
         result_24.push(0);
@@ -245,8 +251,6 @@ pub fn zeiss_to_i64(input_num: i64) -> i64 {
     let mut result = input_num;
     if input_num >= 0x00800000 {
         result = -(0x00FFFFFF - input_num);
-        // To convert the numbers into something reasonable, if the 6 bit
-        // representation is over 0x800000, then it is made negative and
     }
 
     result
@@ -256,8 +260,6 @@ pub fn i64_to_zeiss(input_num: i64) -> i64 {
     let mut result = input_num;
     if input_num < 0 {
         result = 0x00FFFFFF - -(input_num | 0x00F00000);
-        // To convert the numbers into something reasonable, if the 6 bit
-        // representation is over 0x800000, then it is made negative and
     }
 
     result
