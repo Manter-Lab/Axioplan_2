@@ -1,24 +1,20 @@
-[package]
-name = "zeiss-gui"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "axioplan",
+    "zeiss_gui",
+]
 
-[dependencies]
-enum-iterator = "1.4.1"
-gdk-pixbuf = "0.18.0"
-log = "0.4.20"
-pretty_env_logger = "0.5.0"
-serialport = "4.2.2"
-vgtk = "0.3.0"
+[workspace.package]
+authors = ["G2-Games <ke0bhogsg@gmail.com>"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
-[dependencies.zeiss_control]
-path = "lib/zeiss-control"
-version = "0.0.1"
-
-[dependencies.nokhwa]
-path = "lib/nokhwa"
-version = "0.11.0"
-# Use the native input backends, enable WGPU integration
-features = ["input-native", "output-wgpu", "output-threaded"]
+[profile.production]
+inherits = "release"
+strip = true
+lto = true
+opt-level = "z"
+codegen-units = 1
+panic = "abort"

@@ -8,14 +8,12 @@ use std::time::Instant;
 #[derive(Debug)]
 pub struct Scope {
     pub scope_port: Box<dyn SerialPort>,
-    pub stage_port: Box<dyn SerialPort>,
 }
 
 impl Clone for Scope {
     fn clone(&self) -> Self {
         Scope {
             scope_port: self.scope_port.try_clone().unwrap(),
-            stage_port: self.scope_port.try_clone().unwrap()
         }
     }
 }
@@ -23,7 +21,6 @@ impl Clone for Scope {
 #[derive(Debug)]
 pub struct ScopeResponse {
     response: Vec<u8>,
-    response_size: usize
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -56,18 +53,13 @@ impl Scope {
     /// Size of focus steps in micrometers
     const STEP_SIZE: f64 = 0.050;
 
-    pub fn new(scope_port: &str, stage_port: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(scope_port: &str) -> Result<Self, Box<dyn Error>> {
         let scope_port = serialport::new(scope_port, 9600)
-            .timeout(Self::TIMEOUT)
-            .open()?;
-
-        let stage_port = serialport::new(stage_port, 9600)
             .timeout(Self::TIMEOUT)
             .open()?;
 
         Ok(Scope {
             scope_port,
-            stage_port,
         })
     }
 
@@ -85,7 +77,6 @@ impl Scope {
         if !expect_response {
             return Ok(ScopeResponse {
                 response: vec![],
-                response_size: 0
             })
         }
 
@@ -111,19 +102,9 @@ impl Scope {
             }
         }
 
-        let total = read_buffer.len();
-
         Ok(ScopeResponse {
             response: read_buffer,
-            response_size: total
         })
-    }
-
-    pub fn query_scope_print(&mut self, query: &str) -> Result<(), Box<dyn Error>> {
-        let result = self.query_scope(query, true)?;
-        println!("{:?}", result.response);
-        println!("{}\r", String::from_utf8(result.response).unwrap());
-        Ok(())
     }
 
     /// Validate the query and get data from it
@@ -173,7 +154,7 @@ impl Scope {
     }
 
     /// Gets the light diaphragm aperture
-    pub fn ld_pos(&mut self) -> Result<u8, Box<dyn Error>> {
+    pub fn light_diaphragm_aperture(&mut self) -> Result<u8, Box<dyn Error>> {
         let query = "HPCs4,1\r";
         let res = self.query_scope(query, true)?;
         let response = self.validate(query, &res.response)?;
@@ -183,7 +164,7 @@ impl Scope {
     }
 
     /// Sets the light diaphragm aperture
-    pub fn set_ld_pos(&mut self, position: u8) -> Result<(), Box<dyn Error>> {
+    pub fn set_light_diaphragm_aperture(&mut self, position: u8) -> Result<(), Box<dyn Error>> {
         let query = format!("HPCS4,{}\r", position);
 
         self.query_scope(&query, false)?;
@@ -192,7 +173,7 @@ impl Scope {
     }
 
     /// Gets the focus distance (Z) in steps
-    pub fn focus_dist(&mut self) -> Result<i64, Box<dyn Error>> {
+    pub fn focus_distance(&mut self) -> Result<i64, Box<dyn Error>> {
         let query = "FPZp\r";
 
         let res = self.query_scope(query, true)?;
@@ -207,7 +188,7 @@ impl Scope {
     }
 
     /// Sets the focus distance (Z) in steps
-    pub fn set_focus_dist(&mut self, distance: i64) -> Result<(), Box<dyn Error>> {
+    pub fn set_focus_distance(&mut self, distance: i64) -> Result<(), Box<dyn Error>> {
         let output_num = format!("{:06X?}", i64_to_zeiss(distance));
 
         let mut query = "FPZT".to_string();
@@ -248,15 +229,15 @@ impl Scope {
     }
 
     /// Gets the focus distance (Z) in micrometers (μm)
-    pub fn focus_dist_um(&mut self) -> Result<f64, Box<dyn Error>> {
-        Ok(Self::STEP_SIZE * self.focus_dist()? as f64)
+    pub fn focus_distance_um(&mut self) -> Result<f64, Box<dyn Error>> {
+        Ok(Self::STEP_SIZE * self.focus_distance()? as f64)
     }
 
     /// Sets the focus distance (Z) in micrometers (μm)
-    pub fn set_focus_dist_um(&mut self, distance: f64) -> Result<(), Box<dyn Error>> {
+    pub fn set_focus_distance_um(&mut self, distance: f64) -> Result<(), Box<dyn Error>> {
         let new_distance = distance / Self::STEP_SIZE;
 
-        self.set_focus_dist(new_distance as i64)
+        self.set_focus_distance(new_distance as i64)
     }
 }
 
